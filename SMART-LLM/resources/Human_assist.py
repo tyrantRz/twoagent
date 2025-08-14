@@ -5,6 +5,8 @@ import time
 import sys, atexit
 _saw_closed_once = False
 
+V_WASHED = set()
+
 def _quiet_closed_error(e) -> bool:
     s = str(e).lower()
     return ("write to closed file" in s
@@ -50,6 +52,12 @@ def _quiet_exit():
     except Exception:
         pass
 
+def _mark_washed(obj_id: str):
+    V_WASHED.add(obj_id)
+
+def is_washed(obj_id: str) -> bool:
+    return obj_id in V_WASHED
+
 HELP = """
 [HUMAN HELP] Available command:
   mv <ObjRegex> near robotN         # Move the object to the side of robotN(N=1/2)
@@ -58,6 +66,7 @@ HELP = """
   close <ObjRegex>                  # Close the container
   put <ObjRegex> into <RecRegex>    # Put the object into container(if fail then back to TeleportObject on the container)
   slice <ObjRegex> [with robotN]    # Slice the object using robotN (default robot1)
+  wash  <ObjRegex> [with robotN]    # Try CleanObject first; fallback to virtual clean
   done                              # End processing and continue the task
 """
 
@@ -127,6 +136,9 @@ def human_console_loop(controller, prompt: str = "") -> None:
 
             elif op == "mv":
                 # mv <ObjRegex> near robotN | to x y z
+                if toks[2] == "near":
+                    if len(toks) < 4:
+                        print("[HUMAN] grammar: mv <ObjRegex> near robotN"); continue
                 if len(toks) < 3:
                     print("[HUMAN] grammar:mv <ObjRegex> near robotN | to x y z")
                     continue
@@ -149,11 +161,17 @@ def human_console_loop(controller, prompt: str = "") -> None:
 
             elif op == "open":
                 obj_id = _find_obj_id_by_regex(controller, toks[1])
+                obj_id = _find_obj_id_by_regex(controller, toks[1])
+                if not obj_id:
+                    print("[HUMAN] object not found:", toks[1]); continue
                 ev = controller.step(action="OpenObject", objectId=obj_id, forceAction=True)
                 print("[HUMAN] Open:", ev.metadata["lastActionSuccess"])
 
             elif op == "close":
                 obj_id = _find_obj_id_by_regex(controller, toks[1])
+                obj_id = _find_obj_id_by_regex(controller, toks[1])
+                if not obj_id:
+                    print("[HUMAN] object not found:", toks[1]); continue
                 ev = controller.step(action="CloseObject", objectId=obj_id, forceAction=True)
                 print("[HUMAN] Close:", ev.metadata["lastActionSuccess"])
 
@@ -219,6 +237,40 @@ def human_console_loop(controller, prompt: str = "") -> None:
 
                 ev = controller.step(action="SliceObject", objectId=obj_id, agentId=agent_id, forceAction=True)
                 print("[HUMAN] SliceObject:", ev.metadata.get("lastActionSuccess", False))
+
+            elif op == "wash":
+                if len(toks) < 2:
+                    print("[HUMAN] usage: wash <ObjRegex> [with robotN]")
+                    continue
+
+                agent_id = 0
+                if len(toks) >= 4 and toks[2].lower() == "with":
+                    try:
+                        agent_id = int(toks[3].replace("robot","")) - 1
+                    except Exception:
+                        print("[HUMAN] bad agent spec, fallback to robot1")
+                        agent_id = 0
+
+                obj_id = _find_obj_id_by_regex(controller, toks[1])
+                if not obj_id:
+                    print("[HUMAN] object not found:", toks[1])
+                    continue
+
+                ev = controller.step(action="CleanObject", objectId=obj_id, agentId=agent_id, forceAction=True)
+                if ev.metadata.get("lastActionSuccess", False):
+                    print("[HUMAN] CleanObject:", True)
+                    continue
+
+                _teleport_near(controller, agent_id, obj_id, dx=0.25)
+                ev = controller.step(action="CleanObject", objectId=obj_id, agentId=agent_id, forceAction=True)
+                if ev.metadata.get("lastActionSuccess", False):
+                    print("[HUMAN] CleanObject (after reposition):", True)
+                    continue
+
+                _mark_washed(obj_id)
+                print("[HUMAN] CleanObject failed; fallback to virtual clean:", obj_id, "(marked CLEAN)")
+
+
             else:
                 print("[HUMAN] unsurported command:", op)
 

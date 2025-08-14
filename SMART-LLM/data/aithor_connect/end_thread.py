@@ -1,3 +1,8 @@
+try:
+    from resources.Human_assist import is_washed as _is_washed
+except Exception:
+    def _is_washed(_): return False
+
 
 for i in range(25):
     action_queue.append({'action':'Done'})
@@ -56,6 +61,11 @@ for obj_gt in ground_truth:
         if state == 'PICKED':
             if obj_name in obj["name"] and obj["isPickedUp"]:
                 gcr_complete += 1 
+        
+        if state in ('CLEAN', 'WASHED'):
+            if obj_name in obj["name"]:
+                if (obj.get("isDirty") is False) or _is_washed(obj.get("objectId", "")):
+                    gcr_complete += 1
         
         if len(contains) != 0 and obj_name in obj["name"]:
             print (contains, obj_name, obj["name"])   

@@ -307,6 +307,8 @@ if __name__ == "__main__":
     #   open <ObjRegex>
     #   close <ObjRegex>
     #   put <ObjRegex> into <RecRegex>
+    #   slice <ObjRegex> [with robotN]
+    #   wash <ObjRegex> [with robotN]
     #   done
 
     # Mass & skills policy you must follow inside code:

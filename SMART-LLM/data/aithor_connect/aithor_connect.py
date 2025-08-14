@@ -601,6 +601,12 @@ def SliceObject(robot, sw_obj):
     time.sleep(1)
     
 def CleanObject(robot, sw_obj):
+    if not _require_skill_or_human(
+        robot, "CleanObject", sw_obj,
+        [f"wash {sw_obj}", "done"]  
+    ):
+        return
+    print ("Cleaning: ", sw_obj)
     robot_name = robot['name']
     agent_id = int(robot_name[-1]) - 1
     objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
