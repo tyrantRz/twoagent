@@ -6,6 +6,31 @@ import sys, atexit
 _saw_closed_once = False
 
 V_WASHED = set()
+import re
+
+def _find_obj_meta_by_regex(controller, pattern: str):
+    rgx = re.compile(pattern, re.I)
+    for o in controller.last_event.metadata.get("objects", []):
+        oid = o.get("objectId", "")
+        typ = o.get("objectType", "") or (oid.split("|", 1)[0] if "|" in oid else oid)
+        if rgx.match(oid) or rgx.match(typ):
+            return o
+    return None
+
+def _safe_teleport_object(controller, obj_meta, position_dict):
+    rot = obj_meta.get("rotation") or {"x": 0, "y": 0, "z": 0}
+    ev = controller.step(
+        action="TeleportObject",
+        objectId=obj_meta["objectId"],
+        position={"x": position_dict["x"], "y": position_dict["y"], "z": position_dict["z"]},
+        rotation={"x": rot.get("x", 0), "y": rot.get("y", 0), "z": rot.get("z", 0)},
+        forceAction=True,
+    )
+    return ev.metadata.get("lastActionSuccess", False)
+
+def _center_of_meta(obj_meta):
+    c = obj_meta["axisAlignedBoundingBox"]["center"]
+    return dict(x=c["x"], y=c["y"], z=c["z"])
 
 def _quiet_closed_error(e) -> bool:
     s = str(e).lower()
@@ -67,14 +92,15 @@ HELP = """
   put <ObjRegex> into <RecRegex>    # Put the object into container(if fail then back to TeleportObject on the container)
   slice <ObjRegex> [with robotN]    # Slice the object using robotN (default robot1)
   wash  <ObjRegex> [with robotN]    # Try CleanObject first; fallback to virtual clean
+  break <ObjRegex> [with robotN]    # Break the object using robotN (default robot1)
+  throw <ObjRegex> [with robotN]    # Pick up then throw the object with robotN (default robot1)
   done                              # End processing and continue the task
 """
 
 def _find_obj_id_by_regex(controller, pattern: str) -> Optional[str]:
-    for o in controller.last_event.metadata["objects"]:
-        if re.match(pattern, o["objectId"]):
-            return o["objectId"]
-    return None
+    meta = _find_obj_meta_by_regex(controller, pattern)
+    return meta["objectId"] if meta else None
+
 
 def _agent_pos(controller, agent_id: int) -> Dict[str, float]:
     a = controller.last_event.events[agent_id].metadata["agent"]["position"]
@@ -106,11 +132,15 @@ def _find_agent_holding(controller, agent_id: int, obj_type: str) -> bool:
         pass
     return False
 
-def _teleport_near(controller, agent_id: int, obj_id: str, dx=0.25, dy=0.0, dz=0.0) -> bool:
+def _teleport_near(controller, agent_id: int, obj_id_or_meta, dx=0.25, dy=0.0, dz=0.0) -> bool:
+    obj_meta = (obj_id_or_meta if isinstance(obj_id_or_meta, dict)
+                else _find_obj_meta_by_regex(controller, re.escape(obj_id_or_meta)))
+    if not obj_meta:
+        return False
     pos = _agent_pos(controller, agent_id)
     target = _offset(pos, dx=dx, dy=dy, dz=dz)
-    ev = controller.step(action="TeleportObject", objectId=obj_id, position=target, forceAction=True)
-    return ev.metadata.get("lastActionSuccess", False)
+    return _safe_teleport_object(controller, obj_meta, target)
+
 
 def human_console_loop(controller, prompt: str = "") -> None:
     """
@@ -143,9 +173,10 @@ def human_console_loop(controller, prompt: str = "") -> None:
                     print("[HUMAN] grammar:mv <ObjRegex> near robotN | to x y z")
                     continue
                 obj_pat = toks[1]
-                obj_id = _find_obj_id_by_regex(controller, obj_pat)
-                if not obj_id:
+                obj_meta = _find_obj_meta_by_regex(controller, obj_pat)
+                if not obj_meta:
                     print("[HUMAN] unfind object:", obj_pat); continue
+
                 if toks[2] == "near":
                     robotN = toks[3]  # robot1/robot2
                     agent_id = int(robotN.replace("robot","")) - 1
@@ -156,11 +187,11 @@ def human_console_loop(controller, prompt: str = "") -> None:
                     target = dict(x=x, y=y, z=z)
                 else:
                     print("[HUMAN] wrong grammar"); continue
-                ev = controller.step(action="TeleportObject", objectId=obj_id, position=target, forceAction=True)
+                ok = _safe_teleport_object(controller, obj_meta, target)
+                ev = type("E", (), {"metadata": {"lastActionSuccess": ok}})  
                 print("[HUMAN] TeleportObject:", ev.metadata["lastActionSuccess"])
 
             elif op == "open":
-                obj_id = _find_obj_id_by_regex(controller, toks[1])
                 obj_id = _find_obj_id_by_regex(controller, toks[1])
                 if not obj_id:
                     print("[HUMAN] object not found:", toks[1]); continue
@@ -168,7 +199,6 @@ def human_console_loop(controller, prompt: str = "") -> None:
                 print("[HUMAN] Open:", ev.metadata["lastActionSuccess"])
 
             elif op == "close":
-                obj_id = _find_obj_id_by_regex(controller, toks[1])
                 obj_id = _find_obj_id_by_regex(controller, toks[1])
                 if not obj_id:
                     print("[HUMAN] object not found:", toks[1]); continue
@@ -180,20 +210,21 @@ def human_console_loop(controller, prompt: str = "") -> None:
                 if len(toks) < 4 or toks[2] != "into":
                     print("[HUMAN] grammar: put <ObjRegex> into <RecRegex>")
                     continue
-                obj_id = _find_obj_id_by_regex(controller, toks[1])
-                rec_id = _find_obj_id_by_regex(controller, toks[3])
-                if not obj_id or not rec_id:
+                obj_meta = _find_obj_meta_by_regex(controller, toks[1])
+                rec_meta = _find_obj_meta_by_regex(controller, toks[3])
+                if not obj_meta or not rec_meta:
                     print("[HUMAN] object/container unfound"); continue
-
+                obj_id = obj_meta["objectId"]
+                rec_id = rec_meta["objectId"]
                 # Direct Put may require the agent to hold it; if unsuccessful, it will revert to being transported above the container.
                 ev = controller.step(action="PutObject", objectId=obj_id, receptacleObjectId=rec_id, forceAction=True)
                 ok = ev.metadata["lastActionSuccess"]
                 if not ok:
-                    c = _center_of(controller, rec_id)
+                    c = _center_of_meta(rec_meta)
                     if c:
                         above = dict(x=c["x"], y=c["y"] + 0.2, z=c["z"])
-                        ev = controller.step(action="TeleportObject", objectId=obj_id, position=above, forceAction=True)
-                        ok = ev.metadata["lastActionSuccess"]
+                        ok = _safe_teleport_object(controller, obj_meta, above)
+
                 print("[HUMAN] Put/Teleport fallback:", ok)
             
             elif op == "slice":
@@ -251,24 +282,91 @@ def human_console_loop(controller, prompt: str = "") -> None:
                         print("[HUMAN] bad agent spec, fallback to robot1")
                         agent_id = 0
 
-                obj_id = _find_obj_id_by_regex(controller, toks[1])
-                if not obj_id:
+                obj_meta = _find_obj_meta_by_regex(controller, toks[1])
+                if not obj_meta:
                     print("[HUMAN] object not found:", toks[1])
                     continue
+                obj_id = obj_meta["objectId"]
 
                 ev = controller.step(action="CleanObject", objectId=obj_id, agentId=agent_id, forceAction=True)
                 if ev.metadata.get("lastActionSuccess", False):
+                    _mark_washed(obj_id)
                     print("[HUMAN] CleanObject:", True)
                     continue
 
-                _teleport_near(controller, agent_id, obj_id, dx=0.25)
-                ev = controller.step(action="CleanObject", objectId=obj_id, agentId=agent_id, forceAction=True)
-                if ev.metadata.get("lastActionSuccess", False):
-                    print("[HUMAN] CleanObject (after reposition):", True)
-                    continue
+                sink_meta = _find_obj_meta_by_regex(controller, r"^Sink$")
+                if sink_meta:
+                    c = _center_of_meta(sink_meta)
+                    above = dict(x=c["x"], y=c["y"] + 0.05, z=c["z"])
+                    if _safe_teleport_object(controller, obj_meta, above):
+                        ev2 = controller.step(action="CleanObject", objectId=obj_id, agentId=agent_id, forceAction=True)
+                        if ev2.metadata.get("lastActionSuccess", False):
+                            _mark_washed(obj_id)
+                            print("[HUMAN] CleanObject (after sink teleport):", True)
+                            continue
 
                 _mark_washed(obj_id)
                 print("[HUMAN] CleanObject failed; fallback to virtual clean:", obj_id, "(marked CLEAN)")
+
+
+            elif op == "break":
+                if len(toks) < 2:
+                    print("[HUMAN] usage: break <ObjRegex> [with robotN]")
+                    continue
+
+                agent_id = 0
+                if len(toks) >= 4 and toks[2].lower() == "with":
+                    try:
+                        agent_id = int(toks[3].replace("robot", "")) - 1
+                    except Exception:
+                        print("[HUMAN] bad agent spec, fallback to robot1")
+                        agent_id = 0
+
+                obj_id = _find_obj_id_by_regex(controller, toks[1])
+                if not obj_id:
+                    print("[HUMAN] object not found:", toks[1]); 
+                    continue
+
+                ev = controller.step(action="BreakObject", objectId=obj_id, agentId=agent_id, forceAction=True)
+                if ev.metadata.get("lastActionSuccess", False):
+                    print("[HUMAN] BreakObject:", True)
+                    continue
+
+            elif op == "throw":
+                if len(toks) < 2:
+                    print("[HUMAN] usage: throw <ObjRegex> [with robotN]")
+                    continue
+
+                agent_id = 0
+                if len(toks) >= 4 and toks[2].lower() == "with":
+                    try:
+                        agent_id = int(toks[3].replace("robot", "")) - 1
+                    except Exception:
+                        print("[HUMAN] bad agent spec, fallback to robot1")
+                        agent_id = 0
+
+                obj_pat = toks[1]
+                obj_id = _find_obj_id_by_regex(controller, obj_pat)
+                if not obj_id:
+                    print("[HUMAN] object not found:", obj_pat)
+                    continue
+
+                if not _find_agent_holding(controller, agent_id, obj_pat.split("|")[0]):
+                    ev = controller.step(action="PickupObject", objectId=obj_id, agentId=agent_id, forceAction=True)
+                    if not ev.metadata.get("lastActionSuccess", False):
+                        _teleport_near(controller, agent_id, obj_id, dx=0.0)
+                        ev = controller.step(action="PickupObject", objectId=obj_id, agentId=agent_id, forceAction=True)
+                        if not ev.metadata.get("lastActionSuccess", False):
+                            print("[HUMAN] Pickup failed. Tip: mv", obj_pat, "near robot{} then retry 'throw ...'".format(agent_id+1))
+                            continue
+
+                ev = controller.step(action="ThrowObject", moveMagnitude=7, agentId=agent_id, forceAction=True)
+                print("[HUMAN] ThrowObject:", ev.metadata.get("lastActionSuccess", False))
+
+
+                _teleport_near(controller, agent_id, obj_id, dx=0.25)
+                ev = controller.step(action="BreakObject", objectId=obj_id, agentId=agent_id, forceAction=True)
+                print("[HUMAN] BreakObject:", ev.metadata.get("lastActionSuccess", False))
 
 
             else:

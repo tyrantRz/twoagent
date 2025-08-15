@@ -19,6 +19,69 @@ sys.path.append(".")
 import resources.actions as actions
 import resources.robots as robots
 
+# --- Compact, shared prompt snippets (English) ---
+
+COMPACT_DECOMP = r"""
+# === HUMAN-ASSIST (Decomposition, brief) ===
+# Mark HUMAN only when ALL active robots lack the required skill,
+# the object is too heavy, occluded/unreachable, or you need >2 concurrent actions (cap=2).
+# For wash/clean/rinse subtasks, the plan MUST include:
+# Put item into Sink -> SwitchOn Faucet -> CleanObject -> SwitchOff Faucet.
+# Footer exactly:
+# [HUMAN_ASSIST_CANDIDATES]
+# - <reason> -> <1-2 steps>
+# or: [HUMAN_ASSIST_CANDIDATES] none
+"""
+
+
+COMPACT_ALLOC = r"""
+# === ALLOCATION POLICY (brief) ===
+# Max 2 robots can act concurrently.
+# Prefer robots whose skills match the subtask exactly.
+# Use HUMAN only for: missing skill across all active robots, object too heavy,
+# occluded/unreachable, or >2 concurrent needs.
+# Prefer robots that have BOTH PickupObject and PutObject for container placement.
+# If the task mentions wash/clean/rinse, prefer a robot with CleanObject; still MUST implement the strict sequence.
+"""
+
+
+COMPACT_CODE = r"""
+# === CODE CONSTRAINTS (concise) ===
+# Return only valid Python. Convert any markers to comments.
+# Allowed atomic actions (NO DropHandObject):
+# GoToObject, PickupObject, PutObject, OpenObject, CloseObject,
+# SliceObject, SwitchOn, SwitchOff, BreakObject, CleanObject, ThrowObject, PushObject, PullObject.
+
+# Concurrency cap: at most 2 robots act concurrently.
+# Always call atomic actions with ONE robot (never a list).
+ACTIVE_ROBOTS = robots[:min(2, len(robots))]
+def pick_robot(candidates=ACTIVE_ROBOTS, prefer_skill=None):
+    for r in candidates:
+        if prefer_skill and prefer_skill in set(r.get("skills", [])): return r
+    return candidates[0]
+
+# Carrying / handoff:
+# Prefer the same robot to continue operating on the same object.
+# If switching robots: PutObject to a stable surface (CounterTop/Sink), then the next robot PickupObject.
+
+# HUMAN(reason, steps): only when required. Operator whitelist: mv/open/close/put/slice/wash/break/throw/done
+
+# === STRICT WASHING SEQUENCE (HARD REQUIREMENT) ===
+# If the task text contains 'wash', 'clean', or 'rinse' (case-insensitive),
+# you MUST implement this exact order for the target item ITEM (e.g., 'Lettuce') and MUST NOT reorder:
+# 1) r = pick_robot(prefer_skill="PutObject")
+# 2) GoToObject(r, "Sink")
+# 3) PutObject(r, "ITEM", "Sink")      # item is inside sink before faucet on
+# 4) SwitchOn(r, "Faucet")
+# 5) CleanObject(r, "ITEM")            # do not skip; if robots lack skill, use HUMAN fallback
+# 6) time.sleep(3)
+# 7) SwitchOff(r, "Faucet")            # never switch off before CleanObject
+# 8) PickupObject(r, "ITEM")
+# Then continue (e.g., GoToObject(r, "CounterTop"); PutObject(r, "ITEM", "CounterTop")).
+# NEVER call SwitchOn/SwitchOff on 'Faucet' outside this sequence in washing subtasks.
+"""
+
+
 
 def LM(prompt, gpt_version, max_tokens=128, temperature=0, stop=None, logprobs=1, frequency_penalty=0):
     
@@ -165,27 +228,9 @@ if __name__ == "__main__":
     
     prompt += "\n\n" + decompose_prompt
 
-    # >>> ADD: Human-assist rules for decomposition
-    prompt += r"""
+    # >>> ADD: Human-assist rules for decomposition (compact)
+    prompt += COMPACT_DECOMP
 
-    # === HUMAN-ASSIST RULES (Decomposition) ===
-    # While decomposing the task, explicitly mark steps that may require HUMAN assistance:
-    # Triggers (non-exhaustive):
-    # 1) Missing skills: required action not in any robot's 'skills'.
-    # 2) Mass constraint: target object's mass > all robots' capacity.
-    #    - Interpret robot capacity as: robot['mass_capacity'] if present,
-    #      else robot['mass'] if present, else treat as infinite.
-    #    - Object mass is given in 'objects' list (dict with 'name' and 'mass').
-    # 3) Occlusion / Closed container risk: target likely inside a closed receptacle or not visible.
-    # 4) Navigation risk: repeated nav updates without progress (unreachable/blocked).
-    # 5) Concurrency cap: only 2 agents allowed; extra parallel subtasks should be pre-staged by HUMAN.
-
-    # At the end of the decomposition, add this section exactly:
-    [HUMAN_ASSIST_CANDIDATES]
-    - <short reason 1> -> <what the human should do in 1-2 steps>
-    - <short reason 2> -> <what the human should do in 1-2 steps>
-    # If none, write: [HUMAN_ASSIST_CANDIDATES] none
-    """
 
     print ("Generating Decompsed Plans...")
     
@@ -219,17 +264,9 @@ if __name__ == "__main__":
     
     prompt += "\n\n" + allocated_prompt + "\n\n"
 
-    # >>> ADD: Human as a resource + 2-agent cap
-    prompt += r"""
-    # === HUMAN in Allocation ===
-    # You may allocate a temporary HUMAN helper when robots alone cannot satisfy a subtask
-    # due to skills/mass/occlusion, or when parallelization is blocked by the 2-agent limit.
-    # Describe WHY the HUMAN is needed and WHAT they should do to unblock robots,
-    # but DO NOT modify robot action implementations.
+    # >>> ADD: Allocation policy (compact)
+    prompt += COMPACT_ALLOC
 
-    # HARD CONSTRAINT: At most 2 robots may act concurrently in this environment.
-    # If more robots are listed in 'robots', pick <= 2 and stage the rest via HUMAN pre-steps.
-    """
 
     allocated_plan = []
     for i, plan in enumerate(decomposed_plan):
@@ -279,53 +316,11 @@ if __name__ == "__main__":
     
     prompt += "\n\n" + code_prompt + "\n\n"
 
-    prompt += r"""
-    # === OUTPUT CONTRACT (CRITICAL) ===
-    # - Only output legal Python.
-    # - Any markers like [HUMAN_ASSIST_CANDIDATES] must be changed to Python comments:
-    #     # [HUMAN_ASSIST_CANDIDATES]
-    #     # none
-    # - Any explanatory text should be marked with footnotes (starting with #).
-    """
+    
+    # --- compact code policy (one block only)
+    prompt += COMPACT_CODE
 
-    # >>> ADD: HUMAN() API usage + operator command whitelist + action signatures
-    prompt += f"""
-    # === HUMAN helper API available at runtime ===
-    # Call this to PAUSE execution, explain WHY a human is needed and WHAT to do,
-    # then wait until the operator types 'done' in the console.
-    #    HUMAN(reason: str, steps: list[str])
-    #
-    # IMPORTANT:
-    # - Do NOT modify provided robot action function names (GoToObject, OpenObject, CloseObject,
-    #   PickupObject, PutObject, DropHandObject, SliceObject, SwitchOn, SwitchOff, BreakObject, CleanObject, ThrowObject, PushObject, PullObject).
-    # - Insert a blocking HUMAN(...) WHEN (and only when) allocation/decomposition indicates it is needed.
-    # - Keep HUMAN steps minimal (1-3 concise commands) and use the operator command whitelist below.
 
-    # Operator console command whitelist (the human will type these **exactly**):
-    #   mv <ObjRegex> near robotN
-    #   mv <ObjRegex> to <x> <y> <z>
-    #   open <ObjRegex>
-    #   close <ObjRegex>
-    #   put <ObjRegex> into <RecRegex>
-    #   slice <ObjRegex> [with robotN]
-    #   wash <ObjRegex> [with robotN]
-    #   done
-
-    # Mass & skills policy you must follow inside code:
-    # - Robot mass capacity := robot['mass_capacity'] if present else robot['mass'] if present else +inf
-    # - If object.mass > max(robot capacities), insert:
-    #     HUMAN("Object too heavy for available robots.",
-    #           ["mv <ObjectRegex> near robot1", "done"])
-    # - If required skill is missing across both robots, insert a HUMAN(...) describing the missing skill and the minimal pre-staging step(s).
-
-    # Action signatures (for reference only, do not change names):
-    #   {actions.ai2thor_actions}
-    """
-    prompt += r"""
-    # Robot list safety:
-    # - ALWAYS define ACTIVE_ROBOTS = robots[:min(2, len(robots))] at the start of your code solution.
-    # - ALWAYS pass ACTIVE_ROBOTS (or a slice of it) to functions, NEVER index robots[1] unless len(robots) >= 2.
-    """
 
     for i, (plan, solution) in enumerate(zip(decomposed_plan,allocated_plan)):
         curr_prompt = prompt + plan
@@ -344,7 +339,6 @@ if __name__ == "__main__":
 
         delay = 30 if "gpt-4" in args.gpt_version else 1
         time.sleep(delay)
-        
         code_plan.append(text)
     
     # save generated plan

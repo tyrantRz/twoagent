@@ -51,18 +51,38 @@ def boot_env(floor_no: int, agent_count: int, want_topcam: bool = True,
     locked_ctrl = LockedController(ctrl, lock)
     return locked_ctrl, has_top
 
-def _require_skill_or_human(robot, skill: str, obj_regex: str, human_steps: list[str]) -> bool:
+# --- helpers: accept single robot or a list of robots ---
+def _as_list(x):
+    return x if isinstance(x, list) else [x]
+
+def _choose_robot(robots, prefer_skill: str | None = None):
+    rlist = _as_list(robots)
+    if prefer_skill:
+        for r in rlist:
+            if prefer_skill in set(r.get("skills", [])):
+                return r
+    return rlist[0]
+
+def _agent_id_for(robots, prefer_skill: str | None = None):
+    r = _choose_robot(robots, prefer_skill)
+    name = r.get("name", "robot1")
+    agent_id = int(name.replace("robot", "")) - 1
+    return agent_id, r
+
+
+def _require_skill_or_human(robot_or_robots, skill: str, obj_regex: str, human_steps: list[str]) -> bool:
     """
     Return True indicates that the robot has the skill and the original logic should be executed.
     Returning False indicates that the robot does not possess the skill. The reason has been printed 
     and a prompt for a human to execute in the console has been displayed. The caller should `return` to end this action.
     """
-    skills = set(robot.get("skills", []))
-    if skill in skills:
-        return True
+    rlist = _as_list(robot_or_robots)
+    for r in rlist:
+        if skill in set(r.get("skills", [])):
+            return True
 
-    name = robot.get("name", "robot1")
-    reason = f"Active robot {name} lacks the skill: {skill} (target: {obj_regex})."
+    names = ", ".join(r.get("name", "?") for r in rlist)
+    reason = f"Active robots [{names}] lack the skill: {skill} (target: {obj_regex})."
     print("\n[NEED HUMAN] Reason:", reason)
     print("[HOW TO HELP]:")
     for s in human_steps:
@@ -262,6 +282,19 @@ def exec_actions():
                     multi_agent_event = c.step(action="BreakObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
+                    else:
+                        success_exec += 1
+
+                elif act['action'] == 'CleanObject':
+                    total_exec += 1
+                    multi_agent_event = c.step(
+                        action="CleanObject",
+                        objectId=act['objectId'],
+                        agentId=act['agent_id'],
+                        forceAction=True
+                    )
+                    if multi_agent_event.metadata['errorMessage'] != "":
+                        print(multi_agent_event.metadata['errorMessage'])
                     else:
                         success_exec += 1
  
@@ -521,8 +554,10 @@ def SwitchOff(robot, sw_obj):
         time.sleep(1)      
     
 def OpenObject(robot, sw_obj):
-    robot_name = robot['name']
-    agent_id = int(robot_name[-1]) - 1
+    if not _require_skill_or_human(robot, "OpenObject", sw_obj, [f"open {sw_obj}", "done"]):
+        return
+    print("Opening: ", sw_obj)
+    agent_id, robot = _agent_id_for(robot, "OpenObject")
     objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
     
     for obj in objs:
@@ -541,8 +576,10 @@ def OpenObject(robot, sw_obj):
     time.sleep(1)
     
 def CloseObject(robot, sw_obj):
-    robot_name = robot['name']
-    agent_id = int(robot_name[-1]) - 1
+    if not _require_skill_or_human(robot, "CloseObject", sw_obj, [f"close {sw_obj}", "done"]):
+        return
+    print("Closing: ", sw_obj)   
+    agent_id, robot = _agent_id_for(robot, "CloseObject")
     objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
     
     for obj in objs:
@@ -565,8 +602,10 @@ def CloseObject(robot, sw_obj):
     time.sleep(1)
     
 def BreakObject(robot, sw_obj):
-    robot_name = robot['name']
-    agent_id = int(robot_name[-1]) - 1
+    if not _require_skill_or_human(robot, "BreakObject", sw_obj, [f"break {sw_obj}", "done"]):
+        return
+    print ("Breaking: ", sw_obj)
+    agent_id, robot = _agent_id_for(robot, "BreakObject")
     objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
     
     for obj in objs:
@@ -580,14 +619,10 @@ def BreakObject(robot, sw_obj):
     time.sleep(1)
     
 def SliceObject(robot, sw_obj):
-    if not _require_skill_or_human(
-        robot, "SliceObject", sw_obj,
-        [f"slice {sw_obj}", "done"]  
-    ):
+    if not _require_skill_or_human(robot, "SliceObject", sw_obj, [f"slice {sw_obj}", "done"]):
         return
     print ("Slicing: ", sw_obj)
-    robot_name = robot['name']
-    agent_id = int(robot_name[-1]) - 1
+    agent_id, robot = _agent_id_for(robot, "SliceObject")
     objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
     
     for obj in objs:
@@ -601,14 +636,10 @@ def SliceObject(robot, sw_obj):
     time.sleep(1)
     
 def CleanObject(robot, sw_obj):
-    if not _require_skill_or_human(
-        robot, "CleanObject", sw_obj,
-        [f"wash {sw_obj}", "done"]  
-    ):
+    if not _require_skill_or_human(robot, "CleanObject", sw_obj, [f"wash {sw_obj}", "done"]):
         return
     print ("Cleaning: ", sw_obj)
-    robot_name = robot['name']
-    agent_id = int(robot_name[-1]) - 1
+    agent_id, robot = _agent_id_for(robot, "CleanObject")
     objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
 
     for obj in objs:
@@ -622,8 +653,10 @@ def CleanObject(robot, sw_obj):
     time.sleep(1)
     
 def ThrowObject(robot, sw_obj):
-    robot_name = robot['name']
-    agent_id = int(robot_name[-1]) - 1
+    if not _require_skill_or_human(robot, "ThrowObject", sw_obj, [f"throw {sw_obj}", "done"]):
+        return
+    print ("Throwing: ", sw_obj)
+    agent_id, robot = _agent_id_for(robot, "ThrowObject")
     objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
 
     for obj in objs:

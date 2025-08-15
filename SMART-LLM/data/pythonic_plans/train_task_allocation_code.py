@@ -1,7 +1,7 @@
 # EXAMPLE 1 - Task Description: Wash the fork. 
 # GENERAL TASK DECOMPOSITION
 # Independent subtasks:
-# SubTask 1: Wash the Fork. (Skills Required: GoToObject, PickupObject, PutObject, SwitchOn, SwitchOff)
+# SubTask 1: Wash the Fork. (Skills Required: GoToObject, PickupObject, PutObject, SwitchOn, CleanObject, SwitchOff)
 # We can perform SubTask 1 
 
 # CODE
@@ -13,14 +13,21 @@ def wash_fork():
     PickupObject('Fork')
     # 3: Go to the Sink.
     GoToObject('Sink')
-    # 4: Put the Fork inside the Sink
+    # 4: Put the Fork inside the Sink.
     PutObject('Fork', 'Sink')
-    # 5: Switch on the Faucet to clean the Fork
+    # 5: Switch on the Faucet.
     SwitchOn('Faucet')
-    # 6: Wait for a while to let the Fork clean.
-    time.sleep(5)
-    # 7: Switch off the Faucet
+    # 6: Clean the Fork (critical).
+    CleanObject('Fork')
+    # 7: brief dwell to simulate washing.
+    time.sleep(3)
+    # 8: Switch off the Faucet.
     SwitchOff('Faucet')
+    # 9: Pick the Fork back.
+    PickupObject('Fork')
+    # 10: Place it on the CounterTop (tidy up).
+    GoToObject('CounterTop')
+    PutObject('Fork', 'CounterTop')
 # Perform SubTask 1
 task1_thread = threading.Thread(target=wash_fork)
 # Start executing SubTask 1 
@@ -28,7 +35,9 @@ task1_thread.start()
 # Task wash the fork is done
 
 # TASK ALLOCATION
-robots = [{'name': 'robot1', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject', 'SwitchOn', 'SwitchOff', 'DropHandObject', 'ThrowObject', 'PushObject', 'PullObject'],'mass': 2}, {'name': 'robot2', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject', 'PickupObject', 'PutObject', 'SwitchOn', 'SwitchOff', 'DropHandObject', 'ThrowObject', 'PushObject', 'PullObject'],'mass': 2}]
+robots = [{'name': 'robot1', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject',
++                                        'PickupObject', 'PutObject', 'SwitchOn', 'CleanObject', 'SwitchOff',
++                                        'ThrowObject', 'PushObject', 'PullObject'], 'mass': 2}]
 # SOLUTION
 # All the robots DONOT share the same set and number (no_skills) of skills & all objects have different masses. In this case where all robots have different sets of skills and objects have different mass - Focus on Task Allocation based on Robot Skills alone. 
 # Analyze the skills required for each subtask and the skills each robot possesses. In this scenario, we have one main subtasks: 'Wash the Fork'.
@@ -39,20 +48,28 @@ robots = [{'name': 'robot1', 'skills': ['GoToObject', 'OpenObject', 'CloseObject
 def wash_fork(robot_list):
     # robot_list = [robot1]
     # 0: SubTask 2: Wash the Fork
+    r = robot_list[0]
     # 1: Go to the Fork using robot1.
-    GoToObject(robot_list[0],'Fork')
+    GoToObject(r,'Fork')
     # 2: Pick up the Fork using robot1.
-    PickupObject(robot_list[0],'Fork')
+    PickupObject(r,'Fork')
     # 3: Go to the Sink using robot1.
-    GoToObject(robot_list[0],'Sink')
-    # 4: Put the Fork inside the Sink using robot1
-    PutObject(robot_list[0],'Fork', 'Sink')
-    # 5: Switch on the Faucet to clean the Fork using robot1
-    SwitchOn(robot_list[0],'Faucet')
-    # 6: Wait for a while to let the Fork clean using robot1.
-    time.sleep(5)
-    # 7: Switch off the Faucet using robot1
-    SwitchOff(robot_list[0],'Faucet')
+    GoToObject(r,'Sink')
+    # 4: Put the Fork inside the Sink using robot1.
+    PutObject(r,'Fork', 'Sink')
+    # 5: Switch on the Faucet using robot1.
+    SwitchOn(r,'Faucet')
+    # 6: Clean the Fork using robot1 (critical).
+    CleanObject(r,'Fork')
+    # 7: brief dwell to simulate washing.
+    time.sleep(3)
+    # 8: Switch off the Faucet using robot1.
+    SwitchOff(r,'Faucet')
+    # 9: Pick the Fork back using robot1.
+    PickupObject(r,'Fork')
+    # 10: Place it on the CounterTop using robot1.
+    GoToObject(r,'CounterTop')
+    PutObject(r,'Fork', 'CounterTop')
 # Perform SubTask 1 with robot2
 wash_fork([robots[1]])
 # Task wash the fork is done
@@ -202,7 +219,7 @@ throw_fork_in_trash()
 
 
 # TASK ALLOCATION
-robots = [{'name': 'robot1', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject', 'PickupObject', 'PutObject', 'SwitchOn', 'SwitchOff', 'DropHandObject', 'ThrowObject', 'PushObject', 'PullObject'],'mass': 3}, {'name': 'robot2', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject', 'PickupObject', 'PutObject', 'SwitchOn', 'SwitchOff', 'DropHandObject', 'ThrowObject', 'PushObject', 'PullObject'],'mass': 2}, {'name': 'robot3', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject', 'PickupObject', 'PutObject', 'SwitchOn', 'SwitchOff', 'DropHandObject', 'ThrowObject', 'PushObject', 'PullObject'],'mass': 2}]
+robots = [{'name': 'robot1', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject', 'PickupObject', 'PutObject', 'SwitchOn', 'SwitchOff', 'ThrowObject', 'PushObject', 'PullObject'],'mass': 3}, {'name': 'robot2', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject', 'PickupObject', 'PutObject', 'SwitchOn', 'SwitchOff', 'DropHandObject', 'ThrowObject', 'PushObject', 'PullObject'],'mass': 2}, {'name': 'robot3', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject', 'PickupObject', 'PutObject', 'SwitchOn', 'SwitchOff', 'DropHandObject', 'ThrowObject', 'PushObject', 'PullObject'],'mass': 2}]
 # SOLUTION
 # All the robots share the same set and number of skills (no_skills) & all objects DONOT have same mass. In this case where all objects have different mass, and robots have same sets of skills- Focus on Task Allocation based on Mass alone. 
 # Analyze the mass required for each object being PickedUp by the 'PickupObject' skill, and the mass capacity each robot possesses. In this scenario, we have two main subtasks: 'Pick up the Fork' and 'Throw the Fork in the Trash'.
