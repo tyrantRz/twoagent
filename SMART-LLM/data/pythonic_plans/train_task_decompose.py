@@ -217,15 +217,17 @@ def wash_plate():
     PutObject('Plate', 'Sink')
     # 5: Switch on the Faucet to clean the Plate
     SwitchOn('Faucet')
-    # 6: Wait for a while to let the plate clean.
-    time.sleep(5)
-    # 7: Switch off the Faucet
+    # 6: Perform the actual cleaning exactly once.   
+    CleanObject('Plate')
+    # 7: Wait briefly (optional)
+    time.sleep(3)
+    # 8: Switch off the Faucet
     SwitchOff('Faucet')
-    # 8: Pick up the clean Plate.
+    # 9: Pick up the clean Plate.
     PickupObject('Plate')
-    # 9: Go to the CounterTop.
+    # 10: Go to the CounterTop.
     GoToObject('CounterTop')
-    # 10: Place the Plate on the CounterTop
+    # 11: Place the Plate on the CounterTop
     PutObject('Plate', 'CounterTop')
 
 def assemble_sandwich():

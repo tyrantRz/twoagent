@@ -7,14 +7,61 @@ CONTROLLER_LOCK = threading.RLock()
 BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 class LockedController:
+    _COUNTABLE = {
+        "PickupObject", "PutObject", "ToggleObjectOn", "ToggleObjectOff",
+        "OpenObject", "CloseObject", "SliceObject", "ThrowObject",
+        "BreakObject", "CleanObject", "DropHandObject"
+    }
+
     def __init__(self, ctrl, lock):
         self._c = ctrl
         self._lock = lock
+
     def step(self, *args, **kwargs):
+        action_name = None
+        if args and isinstance(args[0], dict):
+            action_name = args[0].get("action")
+        action_name = action_name or kwargs.get("action")
+
+        _count  = kwargs.pop("_count", None)   
+        _source = kwargs.pop("_source", None)  
+
         with self._lock:
-            return self._c.step(*args, **kwargs)
+            ev = self._c.step(*args, **kwargs)
+
+        if action_name in self._COUNTABLE and (_count is None or _count is True):
+            ok = False
+            try:
+                if hasattr(ev, "events"):
+                    ok = any(e.metadata.get("lastActionSuccess", False) for e in ev.events)
+                else:
+                    ok = bool(ev.metadata.get("lastActionSuccess", False))
+            except Exception:
+                ok = False
+
+            global total_exec, success_exec
+            total_exec += 1
+            if ok:
+                success_exec += 1
+
+            try:
+                if hasattr(ev, "events"):
+                    err = "|".join(
+                        [e.metadata.get("errorMessage", "") for e in ev.events
+                         if not e.metadata.get("lastActionSuccess", False)]
+                    )
+                else:
+                    err = ev.metadata.get("errorMessage", "")
+            except Exception:
+                err = ""
+            print(f"[COUNT] action={action_name} src={_source or 'auto'} ok={ok} "
+                  f"total={total_exec} success={success_exec} err={err}")
+
+        return ev
+
     def __getattr__(self, name):
         return getattr(self._c, name)
+
     
 def boot_env(floor_no: int, agent_count: int, want_topcam: bool = True,
              w: int = 1000, h: int = 1000,
@@ -189,7 +236,7 @@ def exec_actions():
 
     img_counter = 0
     
-    while not task_over:
+    while (not task_over) or (len(action_queue) > 0):
         if len(action_queue) > 0:
             try:
                 act = action_queue[0]
@@ -214,7 +261,7 @@ def exec_actions():
                     
                 elif act['action'] == 'PickupObject':
                     total_exec += 1
-                    multi_agent_event = c.step(action="PickupObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
+                    multi_agent_event = c.step(action="PickupObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True, _count=False, _source='robot')
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
                     else:
@@ -222,15 +269,26 @@ def exec_actions():
  
                 elif act['action'] == 'PutObject':
                     total_exec += 1
-                    multi_agent_event = c.step(action="PutObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
+                    kwargs = dict(
+                        action="PutObject",
+                        objectId=act['objectId'],
+                        agentId=act['agent_id'],
+                        forceAction=True,
+                        _count=False, _source='robot'
+                    )
+                    if act.get('receptacleObjectId'):
+                        kwargs['receptacleObjectId'] = act['receptacleObjectId']
+                    multi_agent_event = c.step(**kwargs
+                    )
+
                     if multi_agent_event.metadata['errorMessage'] != "":
-                        print (multi_agent_event.metadata['errorMessage'])
+                        print(multi_agent_event.metadata['errorMessage'])
                     else:
                         success_exec += 1
  
                 elif act['action'] == 'ToggleObjectOn':
                     total_exec += 1
-                    multi_agent_event = c.step(action="ToggleObjectOn", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
+                    multi_agent_event = c.step(action="ToggleObjectOn", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True, _count=False, _source='robot')
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
                     else:
@@ -238,7 +296,7 @@ def exec_actions():
                 
                 elif act['action'] == 'ToggleObjectOff':
                     total_exec += 1
-                    multi_agent_event = c.step(action="ToggleObjectOff", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
+                    multi_agent_event = c.step(action="ToggleObjectOff", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True, _count=False, _source='robot')
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
                     else:
@@ -246,7 +304,7 @@ def exec_actions():
                     
                 elif act['action'] == 'OpenObject':
                     total_exec += 1
-                    multi_agent_event = c.step(action="OpenObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
+                    multi_agent_event = c.step(action="OpenObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True, _count=False, _source='robot')
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
                     else:
@@ -255,7 +313,7 @@ def exec_actions():
                     
                 elif act['action'] == 'CloseObject':
                     total_exec += 1
-                    multi_agent_event = c.step(action="CloseObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
+                    multi_agent_event = c.step(action="CloseObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True, _count=False, _source='robot')
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
                     else:
@@ -263,7 +321,7 @@ def exec_actions():
                         
                 elif act['action'] == 'SliceObject':
                     total_exec += 1
-                    multi_agent_event = c.step(action="SliceObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
+                    multi_agent_event = c.step(action="SliceObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True, _count=False, _source='robot')
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
                     else:
@@ -271,7 +329,7 @@ def exec_actions():
                         
                 elif act['action'] == 'ThrowObject':
                     total_exec += 1
-                    multi_agent_event = c.step(action="ThrowObject", moveMagnitude=7, agentId=act['agent_id'], forceAction=True)
+                    multi_agent_event = c.step(action="ThrowObject", moveMagnitude=7, agentId=act['agent_id'], forceAction=True, _count=False, _source='robot')
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
                     else:
@@ -279,7 +337,7 @@ def exec_actions():
                         
                 elif act['action'] == 'BreakObject':
                     total_exec += 1
-                    multi_agent_event = c.step(action="BreakObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True)
+                    multi_agent_event = c.step(action="BreakObject", objectId=act['objectId'], agentId=act['agent_id'], forceAction=True, _count=False, _source='robot')
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print (multi_agent_event.metadata['errorMessage'])
                     else:
@@ -291,44 +349,62 @@ def exec_actions():
                         action="CleanObject",
                         objectId=act['objectId'],
                         agentId=act['agent_id'],
-                        forceAction=True
+                        forceAction=True, _count=False, _source='robot'
                     )
                     if multi_agent_event.metadata['errorMessage'] != "":
                         print(multi_agent_event.metadata['errorMessage'])
                     else:
                         success_exec += 1
  
-                
+                elif act['action'] == 'DropHandObject':
+                    total_exec += 1
+                    multi_agent_event = c.step(
+                        action="DropHandObject",
+                        agentId=act['agent_id'],
+                        forceAction=True,
+                        _count=False, _source='robot'
+                    )
+                    if multi_agent_event.metadata['errorMessage'] != "":
+                        print(multi_agent_event.metadata['errorMessage'])
+                    else:
+                        success_exec += 1
+
                 elif act['action'] == 'Done':
                     multi_agent_event = c.step(action="Done")
                     
-                    
+                for i,e in enumerate(multi_agent_event.events):
+                    # cv2.imshow('agent%s' % i, e.cv2img)
+                    # f_name = os.path.dirname(__file__) + "/agent_" + str(i+1) + "/img_" + str(img_counter).zfill(5) + ".png"
+                    # cv2.imwrite(f_name, e.cv2img)
+                    f_name = os.path.join(BASE_DIR, f"agent_{i+1}", f"img_{str(img_counter).zfill(5)}.png")
+                    cv2.imwrite(f_name, e.cv2img)
+
+                if has_top and c.last_event.events and c.last_event.events[0].third_party_camera_frames:
+                    # top_view_rgb = cv2.cvtColor(c.last_event.events[0].third_party_camera_frames[-1], cv2.COLOR_BGR2RGB)
+                    # cv2.imshow('Top View', top_view_rgb)
+                    # f_name = os.path.dirname(__file__) + "/top_view/img_" + str(img_counter).zfill(5) + ".png"
+                    # cv2.imwrite(f_name, top_view_rgb)
+                    top_view_rgb = cv2.cvtColor(c.last_event.events[0].third_party_camera_frames[-1], cv2.COLOR_BGR2RGB)
+                    f_name = os.path.join(BASE_DIR, "top_view", f"img_{str(img_counter).zfill(5)}.png")
+                    cv2.imwrite(f_name, top_view_rgb)
+
+                # if cv2.waitKey(25) & 0xFF == ord('q'):
+                #    break
+                
+                img_counter += 1 
+
             except Exception as e:
                 print (e)
                 
-            for i,e in enumerate(multi_agent_event.events):
-                # cv2.imshow('agent%s' % i, e.cv2img)
-                # f_name = os.path.dirname(__file__) + "/agent_" + str(i+1) + "/img_" + str(img_counter).zfill(5) + ".png"
-                # cv2.imwrite(f_name, e.cv2img)
-                f_name = os.path.join(BASE_DIR, f"agent_{i+1}", f"img_{str(img_counter).zfill(5)}.png")
-                cv2.imwrite(f_name, e.cv2img)
+            finally:
+                if len(action_queue) > 0:
+                    action_queue.pop(0)
 
-            if has_top and c.last_event.events and c.last_event.events[0].third_party_camera_frames:
-                # top_view_rgb = cv2.cvtColor(c.last_event.events[0].third_party_camera_frames[-1], cv2.COLOR_BGR2RGB)
-                # cv2.imshow('Top View', top_view_rgb)
-                # f_name = os.path.dirname(__file__) + "/top_view/img_" + str(img_counter).zfill(5) + ".png"
-                # cv2.imwrite(f_name, top_view_rgb)
-                top_view_rgb = cv2.cvtColor(c.last_event.events[0].third_party_camera_frames[-1], cv2.COLOR_BGR2RGB)
-                f_name = os.path.join(BASE_DIR, "top_view", f"img_{str(img_counter).zfill(5)}.png")
-                cv2.imwrite(f_name, top_view_rgb)
+        else:
+            time.sleep(0.01)
 
-            if cv2.waitKey(25) & 0xFF == ord('q'):
-                break
-            
-            img_counter += 1    
-            action_queue.pop(0)
        
-actions_thread = threading.Thread(target=exec_actions)
+actions_thread = threading.Thread(target=exec_actions, daemon=True)
 actions_thread.start()
 
 def GoToObject(robots, dest_obj):
@@ -441,61 +517,216 @@ def GoToObject(robots, dest_obj):
     if dest_obj == "Cabinet" or dest_obj == "Fridge" or dest_obj == "CounterTop":
         recp_id = dest_obj_id
     
+def _wait_until_holding(agent_id: int, obj_regex: str, timeout: float = 8.0):
+    """轮询直到 agent 手里拿到匹配 obj_regex 的物体，或超时。"""
+    import time, re
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        held = _held_object_id(agent_id)
+        if held and re.match(obj_regex, held):
+            return True
+        time.sleep(0.05)
+    return False
+
+def _safe_interactable_poses(object_id: str, agent_id: int):
+    poses = []
+    try:
+        ret = c.step(action="GetInteractablePoses",
+                     objectId=object_id, agentId=agent_id).metadata.get("actionReturn")
+    except Exception:
+        ret = None
+
+    if not ret:
+        return poses
+
+    for p in ret:
+        if isinstance(p, dict):
+            pos = p.get('position') or {}
+            rot = p.get('rotation') or {}
+            poses.append({
+                'pos': {'x': pos.get('x'), 'y': pos.get('y'), 'z': pos.get('z')},
+                'rot_y': (rot.get('y') if isinstance(rot, dict) else None)
+            })
+        elif isinstance(p, (list, tuple)):
+            # [x,y,z] or [x,y,z,rotY]
+            if len(p) >= 3 and all(isinstance(v, (int, float)) for v in p[:3]):
+                poses.append({
+                    'pos': {'x': p[0], 'y': p[1], 'z': p[2]},
+                    'rot_y': (p[3] if len(p) >= 4 and isinstance(p[3], (int, float)) else None)
+                })
+
+    poses = [q for q in poses if q['pos'].get('x') is not None and q['pos'].get('z') is not None]
+    return poses
+
+
 def PickupObject(robots, pick_obj):
     if not isinstance(robots, list):
-        # convert robot to a list
         robots = [robots]
-    no_agents = len (robots)
-    # robots distance to the goal 
-    for idx in range(no_agents):
-        robot = robots[idx]
-        print ("PIcking: ", pick_obj)
-        robot_name = robot['name']
-        agent_id = int(robot_name[-1]) - 1
-        # list of objects in the scene and their centers
-        objs = list([obj["objectId"] for obj in c.last_event.metadata["objects"]])
-        objs_center = list([obj["axisAlignedBoundingBox"]["center"] for obj in c.last_event.metadata["objects"]])
-        
-        for idx, obj in enumerate(objs):
-            match = re.match(pick_obj, obj)
-            if match is not None:
-                pick_obj_id = obj
-                dest_obj_center = objs_center[idx]
-                if dest_obj_center != {'x': 0.0, 'y': 0.0, 'z': 0.0}:
-                    break # find the first instance
-        # GoToObject(robot, pick_obj_id)
-        # time.sleep(1)
-        print ("Picking Up ", pick_obj_id, dest_obj_center)
-        action_queue.append({'action':'PickupObject', 'objectId':pick_obj_id, 'agent_id':agent_id})
-        time.sleep(1)
-    
-def PutObject(robot, put_obj, recp):
-    robot_name = robot['name']
-    agent_id = int(robot_name[-1]) - 1
-    objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
-    objs_center = list([obj["axisAlignedBoundingBox"]["center"] for obj in c.last_event.metadata["objects"]])
-    objs_dists = list([obj["distance"] for obj in c.last_event.metadata["objects"]])
 
-    metadata = c.last_event.events[agent_id].metadata
-    robot_location = [metadata["agent"]["position"]["x"], metadata["agent"]["position"]["y"], metadata["agent"]["position"]["z"]]
-    dist_to_recp = 9999999 # distance b/w robot and the recp obj
-    for idx, obj in enumerate(objs):
-        match = re.match(recp, obj)
-        if match is not None:
-            dist = objs_dists[idx]
-            if dist < dist_to_recp:
-                recp_obj_id = obj
-                dest_obj_center = objs_center[idx]
-                dist_to_recp = dist
-                
+
+    for robot in robots:
+        agent_id = int(robot['name'].replace("robot", "")) - 1
+
+        held0 = _held_object_id(agent_id)
+        if held0:
+            print(f"[PK/SKIP] agent={agent_id+1} already holding {held0}; skip pickup({pick_obj}).")
+            continue
+
+        if any(a.get('action') == 'PickupObject' and a.get('agent_id') == agent_id for a in action_queue):
+            print(f"[PK/SKIP] agent={agent_id+1} already has a pending PickupObject; skip duplicate.")
+            continue
+
+        target = None
+        for o in c.last_event.metadata["objects"]:
+            if re.match(pick_obj, o["objectId"]):
+                target = o; break
+        if not target:
+            print(f"[PK/ERR] no object matched by regex: {pick_obj}")
+            continue
+
+        pick_obj_id = target["objectId"]
+        parent_list = target.get("parentReceptacles") or []
+        parent_id = parent_list[0] if parent_list else None
+        print(f"[PK/CTX] agent={agent_id+1} held_now=None regex='{pick_obj}'")
+        print(f"[PK/TGT] id={pick_obj_id} type={target.get('objectType')} "
+              f"visible={target.get('visible', False)} "
+              f"dist={target.get('distance', None)} "
+              f"pickupable={target.get('pickupable', None)} "
+              f"parent={parent_id}")
+
+        if parent_id:
+            print(f"[PK/POSE] will use {parent_id} poses ONLY for navigation context; PickupObject target stays {pick_obj_id}")
+
+        print(f"[PK/DO ] enqueue PickupObject agent={agent_id+1} objectId={pick_obj_id}")
+        action_queue.append({'action': 'PickupObject', 'objectId': pick_obj_id, 'agent_id': agent_id})
+
+        vis = target.get('visible', False)
+        dist = target.get('distance', 9e9)
+        if (not vis) or (dist is None or dist > 1.5):
+            reason = []
+            if not vis: reason.append("not_visible")
+            if dist is None or dist > 1.5: reason.append(f"distance>{dist:.2f}" if dist else "distance>1.5")
+            print(f"[PK/HINT] target conditions likely bad: {'|'.join(reason)} (you may need nav/rotate/clear blockers)")
+
+        if not _wait_until_holding(agent_id, pick_obj, timeout=8.0):
+            print(f"[PK/WARN] agent={agent_id+1} still not holding '{pick_obj}' after wait; subsequent Put may abort.")
+
+
     
-    global recp_id         
-    # if recp_id is not None:
-    #     recp_obj_id = recp_id
-    # GoToObject(robot, recp_obj_id)
-    # time.sleep(1)
-    action_queue.append({'action':'PutObject', 'objectId':recp_obj_id, 'agent_id':agent_id})
-    time.sleep(1)
+def _held_object_id(agent_id):
+    inv = c.last_event.events[agent_id].metadata.get("inventoryObjects", [])
+    return inv[0]["objectId"] if inv else None
+
+
+def PutObject(robot, put_obj, recp):
+
+    req_agent = int(robot['name'].replace("robot", "")) - 1
+
+    holder_id, held_oid = None, None
+    for aid in range(no_robot):
+        h = _held_object_id(aid)
+        if h and re.match(put_obj, h):
+            holder_id, held_oid = aid, h
+            break
+    if holder_id is None:
+        if _wait_until_holding(req_agent, put_obj, timeout=8.0):
+            holder_id, held_oid = req_agent, _held_object_id(req_agent)
+        else:
+            for aid in range(no_robot):
+                h = _held_object_id(aid)
+                if h and re.match(put_obj, h):
+                    holder_id, held_oid = aid, h
+                    break
+
+    try:
+        meta = c.last_event.events[req_agent].metadata
+        pos = meta['agent']['position']; rot = meta['agent']['rotation']['y']; hor = meta['agent']['cameraHorizon']
+    except Exception:
+        pos = {'x': 0, 'y': 0, 'z': 0}; rot = 0; hor = 0
+    print(f"[PUT/CTX] req_agent={req_agent+1} holder_agent={None if holder_id is None else holder_id+1} "
+          f"held_oid={held_oid} recp_regex='{recp}' (put_obj_regex='{put_obj}') "
+          f"req_pos=({pos['x']:.2f},{pos['y']:.2f},{pos['z']:.2f}) rot={rot:.1f} hor={hor:.1f}")
+
+    if holder_id is None:
+        print("[PUT/ABORT] no agent holds the target object after waiting; skip PutObject.")
+        return
+
+    recp_obj, best_d = None, float('inf')
+    for o in c.last_event.metadata["objects"]:
+        oid = o["objectId"]
+        if re.match(recp, oid):
+            d = o.get("distance", float('inf'))
+            if d < best_d:
+                best_d, recp_obj = d, o
+    if not recp_obj:
+        print(f"[PUT/ABORT] no receptacle matched by '{recp}'.")
+        return
+
+    print(f"[PUT/TGT] recp={recp_obj['objectId']} visible={recp_obj.get('visible', False)} "
+          f"dist={recp_obj.get('distance', None)} openable={recp_obj.get('openable', False)} "
+          f"isOpen={recp_obj.get('isOpen', None)} receptacle={recp_obj.get('receptacle', None)}")
+
+    poses = _safe_interactable_poses(recp_obj['objectId'], holder_id)
+    print(f"[PUT/POSE] {len(poses)} interactable poses for {recp_obj['objectId']}")
+
+    if poses:
+        hpos = c.last_event.events[holder_id].metadata['agent']['position']
+        def d2(p):
+            dx = p['pos']['x'] - hpos['x']; dz = p['pos']['z'] - hpos['z']; return dx*dx + dz*dz
+        best_pose = min(poses, key=d2)
+        print(f"[PUT/NAV] via interactable pose -> {best_pose['pos']} rot={best_pose['rot_y']}")
+        action_queue.append({'action': 'ObjectNavExpertAction', 'position': best_pose['pos'], 'agent_id': holder_id})
+        if best_pose['rot_y'] is not None:
+            cur_rot = c.last_event.events[holder_id].metadata["agent"]["rotation"]["y"]
+            delta = (best_pose['rot_y'] - cur_rot + 540.0) % 360.0 - 180.0
+            if abs(delta) > 1.0:
+                action_queue.append({'action': 'RotateRight' if delta > 0 else 'RotateLeft',
+                                     'degrees': abs(delta), 'agent_id': holder_id})
+    else:
+        need_nav = (not recp_obj.get('visible', False)) or (
+            isinstance(recp_obj.get('distance', None), (int, float)) and recp_obj['distance'] > 1.5
+        )
+        if need_nav:
+            print(f"[PUT/NAV] navigating -> {recp_obj['objectId']} "
+                  f"(visible={recp_obj.get('visible', False)} dist={recp_obj.get('distance')})")
+            GoToObject({'name': f'robot{holder_id+1}', 'skills': []}, recp_obj['objectId'])
+
+    print(f"[PUT/DO ] enqueue PutObject agent={holder_id+1} objectId={held_oid} -> recp={recp_obj['objectId']}")
+    action_queue.append({
+        'action': 'PutObject',
+        'objectId': held_oid,
+        'receptacleObjectId': recp_obj['objectId'],
+        'agent_id': holder_id
+    })
+
+    t0 = time.time(); last = None
+    while time.time() - t0 < 12.0:
+        m = c.last_event.events[holder_id].metadata
+        la = m.get('lastAction')
+        if la == 'PutObject':
+            break
+        if la != last:
+            print(f"[PUT/WAI] agent={holder_id+1} lastAction={la}")
+            last = la
+        time.sleep(0.05)
+
+    m = c.last_event.events[holder_id].metadata
+    held_after = _held_object_id(holder_id)
+    if m.get('lastAction') == 'PutObject':
+        print(f"[PUT/RES] agent={holder_id+1} ok={m.get('lastActionSuccess')} "
+              f"err='{m.get('errorMessage','')}' post_held={held_after}")
+        if not m.get('lastActionSuccess'):
+            suspects = []
+            if not recp_obj.get('visible', False): suspects.append('recp_not_visible')
+            d = recp_obj.get('distance', None)
+            if isinstance(d, (int, float)) and d > 1.5: suspects.append(f'recp_distance>{d:.2f}')
+            if recp_obj.get('openable') and not recp_obj.get('isOpen', True): suspects.append('recp_closed')
+            if recp_obj.get('receptacle') is False: suspects.append('not_a_receptacle')
+            print(f"[PUT/SUSPECT] agent={holder_id+1} reason={'|'.join(suspects) or 'unknown'}")
+    else:
+        print(f"[PUT/WAIT] timeout; lastAction={m.get('lastAction')} (Put may still execute from queue later)")
+
+
          
 def SwitchOn(robot, sw_obj):
     print ("Switching On: ", sw_obj)

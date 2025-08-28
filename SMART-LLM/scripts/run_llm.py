@@ -22,63 +22,132 @@ import resources.robots as robots
 # --- Compact, shared prompt snippets (English) ---
 
 COMPACT_DECOMP = r"""
-# === HUMAN-ASSIST (Decomposition, brief) ===
-# Mark HUMAN only when ALL active robots lack the required skill,
-# the object is too heavy, occluded/unreachable, or you need >2 concurrent actions (cap=2).
-# For wash/clean/rinse subtasks, the plan MUST include:
-# Put item into Sink -> SwitchOn Faucet -> CleanObject -> SwitchOff Faucet.
-# Footer exactly:
+# === HUMAN-ASSIST (Decomposition, strict; English-only comments) ===
+# Mark HUMAN only when: (a) ALL active robots lack the required skill,
+# or (b) there is a hard block (too heavy / occluded / unreachable),
+# or (c) >2 concurrent actors would be required (global cap = 2).
+# Do NOT mark HUMAN for: GoToObject, PickupObject, PutObject, SwitchOn, SwitchOff,
+# unless it's a hard block as defined above.
+
+# Output no natural-language multi-step text inline; use the footer only.
+# Footer must be exactly one of:
 # [HUMAN_ASSIST_CANDIDATES]
 # - <reason> -> <1-2 steps>
-# or: [HUMAN_ASSIST_CANDIDATES] none
+# or:
+# [HUMAN_ASSIST_CANDIDATES] none
+
+# === REQUIRED SUBTASKS (DO NOT SKIP) ===
+# - Keep every verb from the task as a subtask: wash/clean, slice, throw, put/place,
+#   open/close, switch on/off.
+# - If skills are missing, KEEP the subtask and mark HUMAN in the footer; never remove or comment it out.
+# - 'place/put X on/into Y' implies an explicit PutObject(X, Y); navigation alone never satisfies 'place'.
+# - Precondition: Put/Place requires X to be in hand; include a Pickup step if needed.
 """
 
-
 COMPACT_ALLOC = r"""
-# === ALLOCATION POLICY (brief) ===
-# Max 2 robots can act concurrently.
-# Prefer robots whose skills match the subtask exactly.
-# Use HUMAN only for: missing skill across all active robots, object too heavy,
-# occluded/unreachable, or >2 concurrent needs.
-# Prefer robots that have BOTH PickupObject and PutObject for container placement.
-# If the task mentions wash/clean/rinse, prefer a robot with CleanObject; still MUST implement the strict sequence.
+# === ALLOCATION POLICY (strict; English-only comments) ===
+# Concurrency cap: at most 2 robots act at the same time.
+# Prefer robots whose skills exactly match each subtask; consider mass constraints where relevant.
+# HUMAN is allowed only when: all active robots lack the skill, hard block (too heavy / occluded / unreachable),
+# or >2 concurrent actors would be required. Never assign HUMAN for trivial cases.
+# For placement into receptacles, prefer robots that have BOTH PickupObject and PutObject.
+
+# === SAME-OBJECT CONTINUITY (MANDATORY) ===
+# If multiple subtasks operate on the SAME physical object (e.g., wash X then place X on Y),
+# allocate the SAME robot to the entire chain whenever possible.
+# Only reassign if you will add an explicit handoff in code:
+#   PutObject onto a stable surface (CounterTop or Sink) -> next robot PickupObject from there.
 """
 
 
 COMPACT_CODE = r"""
-# === CODE CONSTRAINTS (concise) ===
-# Return only valid Python. Convert any markers to comments.
-# Allowed atomic actions (NO DropHandObject):
+# === CODE CONSTRAINTS (concise; English-only comments) ===
+# Output valid Python only. Convert markers to comments, e.g.:
+#   # [HUMAN_ASSIST_CANDIDATES]
+#   # none
+#
+# Allowed atomic actions (runtime-supported; NO DropHandObject, NO PushObject, NO PullObject):
 # GoToObject, PickupObject, PutObject, OpenObject, CloseObject,
-# SliceObject, SwitchOn, SwitchOff, BreakObject, CleanObject, ThrowObject, PushObject, PullObject.
+# SliceObject, SwitchOn, SwitchOff, BreakObject, CleanObject, ThrowObject.
+#
+# Concurrency cap: ≤2. Each atomic call uses ONE robot (even if runtime accepts a list).
 
-# Concurrency cap: at most 2 robots act concurrently.
-# Always call atomic actions with ONE robot (never a list).
 ACTIVE_ROBOTS = robots[:min(2, len(robots))]
 def pick_robot(candidates=ACTIVE_ROBOTS, prefer_skill=None):
     for r in candidates:
-        if prefer_skill and prefer_skill in set(r.get("skills", [])): return r
+        if prefer_skill and prefer_skill in set(r.get("skills", [])):
+            return r
     return candidates[0]
 
-# Carrying / handoff:
-# Prefer the same robot to continue operating on the same object.
-# If switching robots: PutObject to a stable surface (CounterTop/Sink), then the next robot PickupObject.
+# Carrying / handoff rules:
+# - Prefer the same robot to continue operations on the same object.
+# - If you must switch, do an explicit handoff:
+#   PutObject onto CounterTop/Sink, then the next robot PickupObject from there.
+# - Never assume implicit transfer.
 
-# HUMAN(reason, steps): only when required. Operator whitelist: mv/open/close/put/slice/wash/break/throw/done
+# === STRICT HUMAN USAGE (REINFORCED) ===
+# - HUMAN is allowed ONLY for the cleaning action itself when robots lack CleanObject,
+#   or for hard blocks (too heavy / occluded / unreachable).
+# - NEVER use HUMAN for: GoToObject, PickupObject, PutObject, SwitchOn, SwitchOff.
+# HUMAN(reason, steps) whitelist: mv / open / close / put / slice / wash / break / throw / done
 
-# === STRICT WASHING SEQUENCE (HARD REQUIREMENT) ===
-# If the task text contains 'wash', 'clean', or 'rinse' (case-insensitive),
-# you MUST implement this exact order for the target item ITEM (e.g., 'Lettuce') and MUST NOT reorder:
-# 1) r = pick_robot(prefer_skill="PutObject")
-# 2) GoToObject(r, "Sink")
-# 3) PutObject(r, "ITEM", "Sink")      # item is inside sink before faucet on
-# 4) SwitchOn(r, "Faucet")
-# 5) CleanObject(r, "ITEM")            # do not skip; if robots lack skill, use HUMAN fallback
-# 6) time.sleep(3)
-# 7) SwitchOff(r, "Faucet")            # never switch off before CleanObject
-# 8) PickupObject(r, "ITEM")
-# Then continue (e.g., GoToObject(r, "CounterTop"); PutObject(r, "ITEM", "CounterTop")).
-# NEVER call SwitchOn/SwitchOff on 'Faucet' outside this sequence in washing subtasks.
+# === WASHING PATTERN (NON-NEGOTIABLE TEMPLATE) ===
+# Always implement washing like this (replace 'Lettuce' with the actual target):
+#   r = pick_robot(prefer_skill="PutObject")   # same robot continues the chain
+#   GoToObject(r, "Sink")
+#   PutObject(r, "Lettuce", "Sink")
+#   SwitchOn(r, "Faucet")
+#   # If robots have CleanObject:
+#   #   CleanObject(r, "Lettuce")
+#   # else:
+#   #   HUMAN('Wash the Lettuce', ['wash Lettuce','done'])   # exactly once
+#   time.sleep(2)
+#   SwitchOff(r, "Faucet")
+#   PickupObject(r, "Lettuce")
+# After a successful (or human) clean, NEVER call CleanObject on the same target again.
+
+# === POST-HUMAN WASH GUARANTEE (HARD MANDATE) ===
+# If you used HUMAN('wash ...'), you MUST still emit:
+#   SwitchOff(r, "Faucet")
+#   PickupObject(r, "Lettuce")
+# Do NOT end the washing subtask before the two lines above are emitted.
+# Do NOT assume the human hands the object back.
+
+# === DO-NOT-SKIP GUARANTEE (MANDATORY) ===
+# Do NOT skip, omit, or comment out required subtasks. If a required skill is missing,
+# insert HUMAN(...) once and continue. Never replace a subtask with a comment.
+
+# === HONOR VALID HUMAN CANDIDATES (MANDATORY) ===
+# Honor any [HUMAN_ASSIST_CANDIDATES] that satisfy STRICT HUMAN USAGE by inserting exactly one HUMAN(...)
+# at the correct step, then proceed.
+
+# === DO-NOT-SWITCH OWNER (MANDATORY) ===
+# For the same object across subtasks, keep the SAME robot. Only switch with an explicit handoff:
+#   PutObject(..., "CounterTop"/"Sink") -> next robot PickupObject(...).
+
+# === PLACE MEANS PUT (MANDATORY) ===
+# Implement 'place/put X on/into Y' as:
+#   (1) ensure holding barrier for X
+#   (2) GoToObject(r, "Y")
+#   (3) PutObject(r, "X", "Y")
+# Navigation alone never satisfies 'place'.
+
+# === PRE-PUT HOLDING BARRIER (MANDATORY) ===
+# Before ANY PutObject(r, "<Obj>", "<Rec>"), ensure r is actually holding <Obj>:
+#   aid = int(r['name'].replace('robot','')) - 1
+#   for _ in range(30):   # up to ~3s
+#       if _held_object_id(aid): break
+#       time.sleep(0.1)
+# If still empty: GoToObject(r, "<Obj>"); PickupObject(r, "<Obj>"); then PutObject.
+
+# === ROBOT HANDLE ONLY (HARD RULE) ===
+# All helpers accept robot HANDLE(s) (dict). Never pass 'robot1'/'robot2' strings.
+# Always resolve a handle first, e.g.:
+#   r = pick_robot(prefer_skill="PickupObject")
+#   # or by name: r = next(rr for rr in robots if rr.get("name")=="robot1")
+# Then call:
+#   GoToObject(r, "Lettuce"); PickupObject(r, "Lettuce")
+#   GoToObject(r, "Sink"); PutObject(r, "Lettuce", "Sink")
 """
 
 
@@ -187,13 +256,24 @@ if __name__ == "__main__":
     gt_test_tasks = []    
     trans_cnt_tasks = []
     max_trans_cnt_tasks = []  
-    with open (f"./data/{args.test_set}/FloorPlan{args.floor_plan}.json", "r") as f:
-        for line in f.readlines():
-            test_tasks.append(list(json.loads(line).values())[0])
-            robots_test_tasks.append(list(json.loads(line).values())[1])
-            gt_test_tasks.append(list(json.loads(line).values())[2])
-            trans_cnt_tasks.append(list(json.loads(line).values())[3])
-            max_trans_cnt_tasks.append(list(json.loads(line).values())[4])
+    with open(f"./data/{args.test_set}/FloorPlan{args.floor_plan}.json", "r") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            data = json.loads(line)
+
+            test_tasks.append(data.get("task", ""))
+
+            robots_key = "robot list" if "robot list" in data else "robot_list" 
+            robots_test_tasks.append(data.get(robots_key, []))
+
+            gt_test_tasks.append(data.get("object_states", []))
+
+            trans_val = int(data.get("trans", 0) or 0)
+            max_trans_val = int(data.get("max_trans", trans_val) or trans_val)
+            trans_cnt_tasks.append(trans_val)
+            max_trans_cnt_tasks.append(max_trans_val)
                     
     print(f"\n----Test set tasks----\n{test_tasks}\nTotal: {len(test_tasks)} tasks\n")
     # prepare list of robots for the tasks
@@ -235,8 +315,15 @@ if __name__ == "__main__":
     print ("Generating Decompsed Plans...")
     
     decomposed_plan = []
-    for task in test_tasks:
-        curr_prompt =  f"{prompt}\n\n# Task Description: {task}"
+    for i, task in enumerate(test_tasks):
+        curr_prompt = (
+            f"{prompt}"
+            f"\n\nrobots = {available_robots[i]}"                    
+            f"\n# Task Description: {task}"
+            f"\n# STRICT: Do NOT print any natural-language 'HUMAN: ...' multi-step lists." 
+            f"\n# Use ONLY the footer syntax below with 1-2 steps from the whitelist."      
+            f"\n# [HUMAN_ASSIST_CANDIDATES] or [HUMAN_ASSIST_CANDIDATES] none"
+        )
         
         if "gpt" not in args.gpt_version:
             # older gpt versions

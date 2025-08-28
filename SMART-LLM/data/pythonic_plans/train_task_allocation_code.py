@@ -17,9 +17,9 @@ def wash_fork():
     PutObject('Fork', 'Sink')
     # 5: Switch on the Faucet.
     SwitchOn('Faucet')
-    # 6: Clean the Fork (critical).
+    # 6: Perform the actual cleaning exactly once.
     CleanObject('Fork')
-    # 7: brief dwell to simulate washing.
+    # 7: Dwell briefly to simulate washing.
     time.sleep(3)
     # 8: Switch off the Faucet.
     SwitchOff('Faucet')
@@ -28,6 +28,7 @@ def wash_fork():
     # 10: Place it on the CounterTop (tidy up).
     GoToObject('CounterTop')
     PutObject('Fork', 'CounterTop')
+
 # Perform SubTask 1
 task1_thread = threading.Thread(target=wash_fork)
 # Start executing SubTask 1 
@@ -35,9 +36,15 @@ task1_thread.start()
 # Task wash the fork is done
 
 # TASK ALLOCATION
-robots = [{'name': 'robot1', 'skills': ['GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject',
-+                                        'PickupObject', 'PutObject', 'SwitchOn', 'CleanObject', 'SwitchOff',
-+                                        'ThrowObject', 'PushObject', 'PullObject'], 'mass': 2}]
+robots = [{
+    'name': 'robot1',
+    'skills': [
+        'GoToObject', 'OpenObject', 'CloseObject', 'BreakObject', 'SliceObject',
+        'PickupObject', 'PutObject', 'SwitchOn', 'CleanObject', 'SwitchOff',
+        'ThrowObject', 'PushObject', 'PullObject'
+    ],
+    'mass': 2
+}]
 # SOLUTION
 # All the robots DONOT share the same set and number (no_skills) of skills & all objects have different masses. In this case where all robots have different sets of skills and objects have different mass - Focus on Task Allocation based on Robot Skills alone. 
 # Analyze the skills required for each subtask and the skills each robot possesses. In this scenario, we have one main subtasks: 'Wash the Fork'.
@@ -47,31 +54,32 @@ robots = [{'name': 'robot1', 'skills': ['GoToObject', 'OpenObject', 'CloseObject
 # Code Solution 
 def wash_fork(robot_list):
     # robot_list = [robot1]
-    # 0: SubTask 2: Wash the Fork
     r = robot_list[0]
+    # 0: SubTask 2: Wash the Fork
     # 1: Go to the Fork using robot1.
-    GoToObject(r,'Fork')
+    GoToObject(r, 'Fork')
     # 2: Pick up the Fork using robot1.
-    PickupObject(r,'Fork')
+    PickupObject(r, 'Fork')
     # 3: Go to the Sink using robot1.
-    GoToObject(r,'Sink')
+    GoToObject(r, 'Sink')
     # 4: Put the Fork inside the Sink using robot1.
-    PutObject(r,'Fork', 'Sink')
+    PutObject(r, 'Fork', 'Sink')
     # 5: Switch on the Faucet using robot1.
-    SwitchOn(r,'Faucet')
-    # 6: Clean the Fork using robot1 (critical).
-    CleanObject(r,'Fork')
-    # 7: brief dwell to simulate washing.
+    SwitchOn(r, 'Faucet')
+    # 6: Clean the Fork once using robot1 (critical).
+    CleanObject(r, 'Fork')
+    # 7: Dwell briefly to simulate washing.
     time.sleep(3)
     # 8: Switch off the Faucet using robot1.
-    SwitchOff(r,'Faucet')
+    SwitchOff(r, 'Faucet')
     # 9: Pick the Fork back using robot1.
-    PickupObject(r,'Fork')
+    PickupObject(r, 'Fork')
     # 10: Place it on the CounterTop using robot1.
-    GoToObject(r,'CounterTop')
-    PutObject(r,'Fork', 'CounterTop')
-# Perform SubTask 1 with robot2
-wash_fork([robots[1]])
+    GoToObject(r, 'CounterTop')
+    PutObject(r, 'Fork', 'CounterTop')
+
+# Perform SubTask 1 with robot1
+wash_fork([robots[0]])
 # Task wash the fork is done
 
 
@@ -82,20 +90,24 @@ wash_fork([robots[1]])
 # We can perform SubTask 1.
 
 # CODE
-def put_tomato_in_fridge():
+def put_tomato_in_fridge(robot_list):
+    # robot_list = [robot1]
+    r = robot_list[0]
     # 0: SubTask 1: Put Tomato in Fridge
-    # 1: Go to the Tomato.
-    GoToObject('Tomato')
-    # 2: Pick up the Tomato.
-    PickupObject('Tomato')
-    # 3: Go to the Fridge.
-    GoToObject('Fridge')
-    # 4: Open the Fridge.
-    OpenObject('Fridge')
-    # 5: Put the Tomato in the Fridge.
-    PutObject('Tomato', 'Fridge')
-    # 6: Close the Fridge.
-    CloseObject('Fridge')
+    # 1: Go to the Tomato using robot1.
+    GoToObject(r, 'Tomato')
+    # 2: Pick up the Tomato using robot1.
+    PickupObject(r, 'Tomato')
+    # 3: Go to the Fridge using robot1.
+    GoToObject(r, 'Fridge')
+    # 4: Open the Fridge using robot1.
+    OpenObject(r, 'Fridge')
+    # 5: Put the Tomato in the Fridge using robot1.
+    PutObject(r, 'Tomato', 'Fridge')
+    # 6: Close the Fridge using robot1.
+    CloseObject(r, 'Fridge')
+# Perform SubTask 1 
+put_tomato_in_fridge([robots[0]])
 # Perform SubTask 1
 task1_thread = threading.Thread(target=put_tomato_in_fridge)
 # Start executing SubTask 1
@@ -195,25 +207,25 @@ slice_potato([robots[0],robots[2]])
 # We can execute SubTask 1 first and then SubTask 2.
 
 # CODE
-def pick_up_fork():
+# CODE Solution
+def pick_up_fork(robot_list):
+    # robot_list = [robot1]
+    r = robot_list[0]
     # 0: SubTask 1: Pick up the Fork
-    # 1: Go to the Fork.
-    GoToObject('Fork')
-    # 2: Pick up the Fork.
-    PickupObject('Fork')
+    GoToObject(r, 'Fork')
+    PickupObject(r, 'Fork')
 
-def throw_fork_in_trash():
+def throw_fork_in_trash(robot_list):
+    # robot_list = [robot1]
+    r = robot_list[0]
     # 0: SubTask 2: Throw the Fork in the Trash
-    # 1: Go to the GarbageCan.
-    GoToObject('GarbageCan')
-    # 2: Throw the Fork in the GarbageCan.
-    ThrowObject('Fork', 'GarbageCan')
+    GoToObject(r, 'GarbageCan')
+    ThrowObject(r, 'Fork', 'GarbageCan')
 
 # Execute SubTask 1
-pick_up_fork()
-
+pick_up_fork([robots[0]])
 # Execute SubTask 2
-throw_fork_in_trash()
+throw_fork_in_trash([robots[0]])
 
 # Task throw the fork in the trash is done
 

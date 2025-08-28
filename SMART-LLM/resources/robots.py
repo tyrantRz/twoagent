@@ -103,5 +103,10 @@ robot26 = {'name': 'robot26',  'skills': ['GoToObject','SliceObject', 'PickupObj
 # Only T
 robot27 = {'name': 'robot27',  'skills': ['GoToObject','BreakObject','ThrowObject'], 'mass' : 100}
 
+# Minimal throw-capable robot without Break/Slice
+robot29 = {'name': 'robot29', 'skills': ['GoToObject', 'PickupObject', 'PutObject', 'ThrowObject'], 'mass': 100}
+
+
+
 robots = [robot1, robot2, robot3, robot4, robot5, robot6, robot7, robot8, robot9, robot10,
-          robot11, robot12, robot13, robot14, robot15, robot16, robot17, robot18, robot19, robot20, robot21,robot22, robot23, robot24, robot25, robot26, robot27, robot28]
+          robot11, robot12, robot13, robot14, robot15, robot16, robot17, robot18, robot19, robot20, robot21,robot22, robot23, robot24, robot25, robot26, robot27, robot28, robot29]

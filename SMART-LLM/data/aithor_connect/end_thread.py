@@ -4,17 +4,18 @@ except Exception:
     def _is_washed(_): return False
 
 
-for i in range(25):
-    action_queue.append({'action':'Done'})
-    action_queue.append({'action':'Done'})
-    action_queue.append({'action':'Done'})
-    time.sleep(0.1)
+for _ in range(3):
+    action_queue.append({'action': 'Done'})
+    time.sleep(0.05)
 
 task_over = True
-time.sleep(5)
+try:
+    actions_thread.join(timeout=60)  
+except Exception:
+    pass
 
+exec = (float(success_exec) / float(total_exec)) if total_exec else 0.0
 
-exec = float(success_exec) / float(total_exec)
 
 print (ground_truth)
 objs = list([obj for obj in c.last_event.metadata["objects"]])
